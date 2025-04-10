@@ -118,6 +118,118 @@ Used linked service sqldblinked to securely connect to Azure SQL
   CREATE SCHEMA cars_catalog.gold;
 Managed data through Unity Catalog schema for secure, governed access
 
+📦 Data Transformation in Azure Databricks (Silver & Gold Layers)
+This section documents the data cleansing, dimensional modeling, and star schema transformations performed using PySpark in Databricks, following the Medallion Architecture: Bronze → Silver → Gold.
+
+All transformations from Silver to Gold layer are performed using PySpark notebooks inside Azure Databricks.
+
+- Each dimension table is created using deduped, null-free logic.
+- The fact table combines all dimensions using natural keys and applies core metrics like sales and units.
+
+Notebook: Silver Notebook
+
+📥 Reads ingested Bronze Delta table:
+bronze.sourcecars_data
+
+🧹 Cleansing steps performed:
+
+Dropped nulls from critical columns
+
+Renamed headers and standardized data types
+
+Casted fields like Date_ID, Model_ID, Dealer_ID, etc. into consistent formats
+
+Added audit columns:
+withColumn("load_date", current_timestamp())
+✅ Final DataFrame written to:
+cars_catalog.silver.sourcecars_data
+
+silver_df.write.format("delta").mode("overwrite").saveAsTable("cars_catalog.silver.sourcecars_data")
+
+🟡 Gold Layer – Dimension Table Logic
+
+Each dimension table (dim_model, dim_branch, dim_dealer, dim_date) was created using incremental data processing with surrogate key management and upsert logic, ensuring clean, business-ready dimension records.
+
+This process follows a robust enterprise approach to building Slowly Changing Dimensions – Type 1 using Delta Lake, which allows overwrite-based updates on matching keys.
+
+🔍 Step-by-Step Logic (applied in each dim_* notebook):
+1. Load Source Data from Silver table:
+The base DataFrame is loaded from cars_catalog.silver.sourcecars_data.
+
+The current max surrogate key value is fetched from the existing dim_* table to avoid duplication.
+
+This allows the continuation of surrogate keys for newly added records.
+
+4. Generate Surrogate Keys for New Records:
+New records are assigned surrogate keys by incrementing the previously fetched maximum key.
+
+5. Combine Old and New Records:
+The existing records (unchanged) and the new records (with surrogate keys) are combined into one DataFrame before final write.
+
+6. Perform SCD Type 1 Merge (Upsert):
+Final DataFrame is written to the Gold Delta table using Delta Lake upsert (merge) logic:
+
+If a match is found on the business key → Update
+If not found → Insert as new record
+
+7. Delta Table Management:
+All dimension tables are written and maintained as managed Delta tables in Unity Catalog under:
+
+⭐ fact_sales – Gold Layer Fact Table
+This notebook creates the final fact table by performing joins between the Silver layer fact data and all relevant dimension tables. The objective is to build a business-ready analytical dataset with surrogate key mappings and key metrics.
+
+1. Load Silver Data and Dimension Tables
+Loaded the main transactional dataset from:
+cars_catalog.silver.sourcecars_data
+Loaded each dimension from:
+cars_catalog.gold.dim_model
+cars_catalog.gold.dim_branch
+cars_catalog.gold.dim_dealer
+cars_catalog.gold.dim_date
+2. Perform Inner Joins on Business Keys
+Joined Silver data with each dimension based on actual business keys:
+Model_ID → dim_model.Model_ID
+
+Branch_ID → dim_branch.Branch_ID
+
+Dealer_ID → dim_dealer.Dealer_ID
+
+Date_ID → dim_date.Date_ID
+
+These joins enrich the transactional data with clean dimension attributes, ensuring each record in the fact table is tied to a single version of each dimension entity.
+
+3. Select Required Columns for the Fact Table
+Chose only the necessary columns from joined tables for reporting and analytics.
+
+This includes transactional fields and keys from each dimension.
+
+4. Create a Surrogate Key for Fact Table
+Generated a unique ID for each fact record:
+
+5. Write Final Output to Delta Table
+Stored the result as a managed Delta table:
+Used overwrite mode to support full or incremental refreshes based on pipeline design.
+
+OUTPUT : ![fact](https://github.com/user-attachments/assets/7a47d6f6-f099-4bc0-a4ac-bdfe65462b30)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
